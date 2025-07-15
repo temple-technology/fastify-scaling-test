@@ -49,7 +49,7 @@ profile-*
 .idea
 
 # vscode
-.vscode
+#.vscode
 *code-workspace
 
 # clinic
@@ -63,3 +63,6 @@ test/types/index.js
 
 # compiled app
 dist
+
+# Yarn PnP SDKs
+!.yarn/sdks
