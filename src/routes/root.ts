@@ -1,7 +1,7 @@
 // src/routes/index.ts
 import { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { eq, desc, and, gte, sql, count, avg, sum, inArray } from 'drizzle-orm';
-import { db } from '../db/connection';
+import { db } from '../db/connection.js';
 import { 
   users, 
   categories, 
@@ -11,7 +11,7 @@ import {
   reviews, 
   userActivity, 
   searchQueries 
-} from '../db/schema';
+} from '../db/schema.js';
 
 const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
 

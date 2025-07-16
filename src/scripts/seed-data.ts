@@ -1,8 +1,8 @@
 // src/scripts/seed-data.ts
 import { faker } from '@faker-js/faker';
 import { sql } from 'drizzle-orm';
-import { db } from '../db/connection';
-import * as schema from '../db/schema';
+import { db } from '../db/connection.js';
+import * as schema from '../db/schema.js';
 
 const { users, categories, products, orders, orderItems, reviews, userActivity, searchQueries } = schema;
 
@@ -628,6 +628,6 @@ async function main() {
 }
 
 // Run if called directly
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   main();
 }
