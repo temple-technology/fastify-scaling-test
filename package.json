@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "type": "module",
   "main": "app.ts",
+  "ts-node": {
+    "esm": true
+  },
   "scripts": {
     "start": "node dist/app.js",
     "build": "tsc",
@@ -11,7 +14,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "seed": "ts-node src/scripts/seed-data.ts"
+    "seed": "npm run build && node dist/scripts/seed-data.js"
   },
   "keywords": [],
   "author": "Faraz Patankar",

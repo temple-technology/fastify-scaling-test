@@ -42,33 +42,33 @@ function validateBatch(batch: any[], tableName: string): void {
   }
 }
 
-// Light Dataset Configuration
-const DATASET_SIZE = {
-  users: 100000,
-  categories: 50,
-  products: 20000,
-  orders: 500000,
-  orderItems: 1000000, // avg 2 items per order
-  reviews: 200000, // 40% of orders get reviewed
-  userActivity: 2000000, // 20 activities per user
-  searchQueries: 600000, // search behavior
-};
-
-// Tiny Test Dataset Configuration
+// Light Dataset Configuration (4.3M records - TOO BIG!)
 // const DATASET_SIZE = {
-//   users: 100,
-//   categories: 10,
-//   products: 50,
-//   orders: 200,
-//   orderItems: 400, // avg 2 items per order
-//   reviews: 80, // 40% of orders get reviewed
-//   userActivity: 1000, // 10 activities per user
-//   searchQueries: 300, // search behavior
+//   users: 100000,
+//   categories: 50,
+//   products: 20000,
+//   orders: 500000,
+//   orderItems: 1000000, // avg 2 items per order
+//   reviews: 200000, // 40% of orders get reviewed
+//   userActivity: 2000000, // 20 activities per user
+//   searchQueries: 600000, // search behavior
 // };
 
-console.log('🌱 Light Dataset Configuration:');
+// Super Tiny Test Dataset Configuration (< 500 records total)
+const DATASET_SIZE = {
+  users: 20,
+  categories: 5,
+  products: 15,
+  orders: 30,
+  orderItems: 50, // avg 1.6 items per order
+  reviews: 12, // 40% of orders get reviewed
+  userActivity: 100, // 5 activities per user
+  searchQueries: 50, // search behavior
+};
+
+console.log('🌱 Super Tiny Test Dataset Configuration:');
 console.log(DATASET_SIZE);
-console.log('⏱️ Estimated time: 30-45 minutes\n');
+console.log('⏱️ Estimated time: < 1 minute\n');
 
 async function truncateAllTables() {
   try {
