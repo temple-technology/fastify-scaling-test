@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node dist/app.js",
     "build": "tsc",
-    "dev": "nodemon --watch src src/app.ts",
+    "dev": "nodemon --watch src --exec \"node --loader ts-node/esm src/app.ts\"",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
