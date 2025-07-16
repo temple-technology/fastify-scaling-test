@@ -14,7 +14,7 @@ This example starts a [Fastify](https://www.fastify.io/) server with PostgreSQL 
 
 ## 🛠️ Development Environment Setup
 
-This project uses [Yarn 4+](https://yarnpkg.com/) with `node_modules` for dependency management and ESM for modules.
+This project uses npm for dependency management and CommonJS for modules.
 
 ### For VSCode Users
 - Standard TypeScript and module resolution will work out of the box.
@@ -22,32 +22,32 @@ This project uses [Yarn 4+](https://yarnpkg.com/) with `node_modules` for depend
 
 ### For Other Editors
 - Any editor with TypeScript support will work without additional configuration.
-- Run `yarn install` after cloning.
+- Run `npm install` after cloning.
 
 ### Database Setup
 1. Copy `env.example` to `.env` and configure your database connection
-2. Run database migrations: `yarn db:generate` and `yarn db:push`
-3. For development, you can use `yarn db:studio` to view your database
+2. Run database migrations: `npm run db:generate` and `npm run db:push`
+3. For development, you can use `npm run db:studio` to view your database
 
 ### Running the Project
-- `yarn install`
-- `yarn dev` (for development)
-- `yarn build` and `yarn start` (for production)
+- `npm install`
+- `npm run dev` (for development)
+- `npm run build` and `npm start` (for production)
 
 ## 💁‍♀️ How to use
 
-- Install dependencies `yarn install`
+- Install dependencies `npm install`
 - Set up environment variables (copy `env.example` to `.env`)
-- Run database migrations `yarn db:push`
+- Run database migrations `npm run db:push`
 - Connect to your Railway project `railway link`
-- Start the development server `railway run yarn dev`
+- Start the development server `railway run npm run dev`
 
 ## 🗄️ Database Commands
 
-- `yarn db:generate` - Generate migration files
-- `yarn db:push` - Push schema changes to database
-- `yarn db:migrate` - Run migrations
-- `yarn db:studio` - Open Drizzle Studio (database GUI)
+- `npm run db:generate` - Generate migration files
+- `npm run db:push` - Push schema changes to database
+- `npm run db:migrate` - Run migrations
+- `npm run db:studio` - Open Drizzle Studio (database GUI)
 
 ## 🚀 Railway Deployment
 
