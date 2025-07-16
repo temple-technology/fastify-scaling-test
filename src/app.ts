@@ -1,9 +1,25 @@
 import Fastify from 'fastify';
 import AutoLoad, { AutoloadPluginOptions } from '@fastify/autoload';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import type { AddressInfo } from 'net';
+import cors from '@fastify/cors';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const fastify = Fastify({
-  logger: true
+  logger: {
+    level: process.env.LOG_LEVEL || 'info'
+  }
+});
+
+// Enable CORS for the React app
+const corsOrigin = process.env.CORS_ORIGIN || true;
+fastify.register(cors, {
+  origin: corsOrigin,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
 });
 
 const pluginOptions: Partial<AutoloadPluginOptions> = {
@@ -20,9 +36,10 @@ fastify.register(AutoLoad, {
   options: pluginOptions
 });
 
-fastify.listen({ host: '::', port: Number(process.env.PORT) || 3000 }, function (err, address) {
+fastify.listen({ host: '::', port: Number(process.env.PORT) || 3000 }, function (err: Error | null, address: string | AddressInfo) {
   if (err) {
     fastify.log.error(err)
     process.exit(1)
   }
+  fastify.log.info(`Server listening on ${address}`)
 });

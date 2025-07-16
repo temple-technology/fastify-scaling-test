@@ -64,5 +64,10 @@ test/types/index.js
 # compiled app
 dist
 
-# Yarn PnP SDKs
-!.yarn/sdks
+# Environment variables
+.env
+.env.local
+.env.production
+
+# Drizzle
+drizzle
