@@ -1,28 +1,50 @@
-// src/db/connection.ts
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import * as schema from './schema.js';
 import 'dotenv/config';
 
-// Create PostgreSQL connection pool
+
+
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  // Since PgPool handles connection pooling, keep these moderate
-  max: parseInt(process.env.DB_POOL_MAX || '30'),
+  
+  max: parseInt(process.env.DB_POOL_MAX || '75'),
   min: parseInt(process.env.DB_POOL_MIN || '10'),
   idleTimeoutMillis: parseInt(process.env.DB_POOL_IDLE_TIMEOUT || '30000'),
   connectionTimeoutMillis: parseInt(process.env.DB_POOL_CONNECTION_TIMEOUT || '5000'),
-  // SSL configuration - try with rejectUnauthorized: false for Railway
-  ssl: false
+  
+  ssl: false,
+  
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
+  statement_timeout: parseInt(process.env.DB_STATEMENT_TIMEOUT || '30000'), 
 });
 
-// Create Drizzle instance with schema
+
 export const db = drizzle(pool, { schema });
 
-// Export pool for direct access if needed
+
 export { pool };
 
-// Graceful shutdown
+
+pool.on('connect', (client) => {
+  console.log('📊 New database connection established to PgPool cluster');
+});
+
+pool.on('error', (err, client) => {
+  console.error('❌ Database connection error:', err);
+});
+
+pool.on('acquire', (client) => {
+  console.log('🔄 Database connection acquired from pool');
+});
+
+pool.on('release', (client) => {
+  console.log('🔓 Database connection released back to pool');
+});
+
+
 process.on('SIGINT', async () => {
   console.log('Closing database connections...');
   await pool.end();

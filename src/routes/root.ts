@@ -55,6 +55,204 @@ const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     }
   });
 
+  // Debug endpoint to test system access permissions
+  fastify.get('/api/debug/system-access', async (request, reply) => {
+    const results: Record<string, any> = {};
+    
+    // Test 1: Basic Node.js APIs
+    try {
+      results.nodejs_memory = process.memoryUsage();
+      results.nodejs_memory_success = true;
+    } catch (error) {
+      results.nodejs_memory_success = false;
+      results.nodejs_memory_error = (error as Error).message;
+    }
+    
+    // Test 2: CPU Usage
+    try {
+      results.nodejs_cpu = process.cpuUsage();
+      results.nodejs_cpu_success = true;
+    } catch (error) {
+      results.nodejs_cpu_success = false;
+      results.nodejs_cpu_error = (error as Error).message;
+    }
+    
+    // Test 3: Database object inspection
+    try {
+      results.db_object_type = typeof db;
+      results.db_object_keys = Object.keys(db).slice(0, 10); // First 10 keys only
+      results.db_inspection_success = true;
+    } catch (error) {
+      results.db_inspection_success = false;
+      results.db_inspection_error = (error as Error).message;
+    }
+    
+    // Test 4: Pool object access
+    try {
+      results.pool_exists = !!(db as any)?.pool;
+      results.pool_type = typeof (db as any)?.pool;
+      if ((db as any)?.pool) {
+        results.pool_keys = Object.keys((db as any).pool).slice(0, 10);
+        results.pool_totalCount = (db as any)?.pool?.totalCount;
+        results.pool_idleCount = (db as any)?.pool?.idleCount;
+      }
+      results.pool_access_success = true;
+    } catch (error) {
+      results.pool_access_success = false;
+      results.pool_access_error = (error as Error).message;
+    }
+    
+    // Test 5: Environment variables access
+    try {
+      results.env_access = {
+        NODE_ENV: process.env.NODE_ENV,
+        DB_POOL_MAX: process.env.DB_POOL_MAX,
+        has_database_url: !!process.env.DATABASE_URL
+      };
+      results.env_access_success = true;
+    } catch (error) {
+      results.env_access_success = false;
+      results.env_access_error = (error as Error).message;
+    }
+    
+    // Test 6: Process information
+    try {
+      results.process_info = {
+        uptime: process.uptime(),
+        version: process.version,
+        platform: process.platform,
+        arch: process.arch,
+        pid: process.pid
+      };
+      results.process_info_success = true;
+    } catch (error) {
+      results.process_info_success = false;
+      results.process_info_error = (error as Error).message;
+    }
+    
+    // Test 7: Database connection test
+    try {
+      const dbTest = await db.execute(sql`SELECT 1 as test`);
+      results.db_connection_success = true;
+      results.db_connection_result = dbTest;
+    } catch (error) {
+      results.db_connection_success = false;
+      results.db_connection_error = (error as Error).message;
+    }
+    
+    return {
+      message: 'System access test results',
+      railway_environment: true,
+      test_results: results,
+      timestamp: new Date().toISOString()
+    };
+  });
+
+  // Lightweight monitoring endpoint for high-load scenarios
+  fastify.get('/api/monitoring/health-check', async (request, reply) => {
+    try {
+      // Much lighter version - just essential stats
+      const memUsage = process.memoryUsage();
+      
+      return {
+        status: 'healthy',
+        uptime: Math.floor(process.uptime()),
+        memory_mb: Math.round(memUsage.heapUsed / 1024 / 1024),
+        memory_percent: Math.round((memUsage.heapUsed / memUsage.heapTotal) * 100),
+        timestamp: new Date().toISOString()
+      };
+    } catch (error) {
+      reply.status(500);
+      return { status: 'monitoring_overloaded' };
+    }
+  });
+
+  // Server performance monitoring endpoint
+  fastify.get('/api/monitoring/server-stats', async (request, reply) => {
+    try {
+      // Add circuit breaker logic for high load
+      const currentLoad = process.cpuUsage();
+      if (currentLoad.user > 500000000) { // 500ms of CPU time indicates high load
+        reply.status(503);
+        return { 
+          error: 'Monitoring temporarily unavailable under high load',
+          suggestion: 'Use /api/monitoring/health-check for basic stats'
+        };
+      }
+      
+      const memUsage = process.memoryUsage();
+      const cpuUsage = process.cpuUsage();
+      
+      // Get database pool stats if available - with error handling
+      let dbPoolStats;
+      try {
+        dbPoolStats = {
+          totalConnections: (db as any)?.pool?.totalCount || 'unknown',
+          idleConnections: (db as any)?.pool?.idleCount || 'unknown',
+          waitingClients: (db as any)?.pool?.waitingCount || 'unknown'
+        };
+      } catch (poolError) {
+        dbPoolStats = {
+          status: 'pool_stats_unavailable_under_load'
+        };
+      }
+
+      return {
+        server: {
+          uptime: `${Math.floor(process.uptime())}s`,
+          nodeVersion: process.version,
+          platform: process.platform,
+          architecture: 'PgPool cluster with 3 PostgreSQL nodes'
+        },
+        memory: {
+          rss: `${Math.round(memUsage.rss / 1024 / 1024)}MB`,
+          heapTotal: `${Math.round(memUsage.heapTotal / 1024 / 1024)}MB`,
+          heapUsed: `${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`,
+          external: `${Math.round(memUsage.external / 1024 / 1024)}MB`,
+          arrayBuffers: `${Math.round(memUsage.arrayBuffers / 1024 / 1024)}MB`
+        },
+        cpu: {
+          user: `${Math.round(cpuUsage.user / 1000)}ms`,
+          system: `${Math.round(cpuUsage.system / 1000)}ms`
+        },
+        database: {
+          architecture: 'PgPool cluster',
+          backend_nodes: 3,
+          pool: dbPoolStats,
+          app_pool_max: process.env.DB_POOL_MAX || '75',
+          app_pool_min: process.env.DB_POOL_MIN || '10',
+          health_check_retries: process.env.PGPOOL_HEALTH_CHECK_MAX_RETRIES || '10',
+          cluster_capacity: 'High - distributed across 3 nodes'
+        },
+        limits: {
+          // Updated estimates for PgPool cluster architecture with actual config
+          estimatedMaxConcurrentUsers: Math.min(
+            parseInt(process.env.DB_POOL_MAX || '75') * 3, // 3 requests per connection with cluster (225)
+            Math.floor(memUsage.heapTotal / (1.5 * 1024 * 1024)), // Memory-based estimate
+            400 // Conservative Railway platform limit estimate given actual config
+          ),
+          memoryUsagePercent: Math.round((memUsage.heapUsed / memUsage.heapTotal) * 100),
+          databaseBottleneck: 'Unlikely - PgPool cluster scales well',
+          likelyBottlenecks: ['Railway memory limit', 'Railway connection limit', 'Node.js event loop']
+        },
+        pgpool: {
+          backend_nodes: [
+            'pg-0.RAILWAY_PRIVATE_DOMAIN:5432',
+            'pg-1.RAILWAY_PRIVATE_DOMAIN:5432', 
+            'pg-2.RAILWAY_PRIVATE_DOMAIN:5432'
+          ],
+          load_balancing: 'Active',
+          health_checks: 'Enabled',
+          estimated_total_capacity: '300+ database connections'
+        },
+        timestamp: new Date().toISOString()
+      };
+    } catch (error) {
+      reply.status(500);
+      return { error: 'Failed to get server stats', details: (error as Error).message };
+    }
+  });
+
   // ============================================================================
   // CACHE MANAGEMENT ENDPOINTS
   // ============================================================================
