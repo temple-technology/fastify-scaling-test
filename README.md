@@ -9,8 +9,11 @@ This example starts a [Fastify](https://www.fastify.io/) server with PostgreSQL 
 - Fastify
 - TypeScript
 - PostgreSQL with Drizzle ORM
+- **Upstash Redis caching** for improved performance
 - CORS support for frontend integration
 - Railway deployment ready
+- Smart cache invalidation
+- Load testing optimized routes
 
 ## 🛠️ Development Environment Setup
 
@@ -28,6 +31,15 @@ This project uses npm for dependency management and CommonJS for modules.
 1. Copy `env.example` to `.env` and configure your database connection
 2. Run database migrations: `npm run db:generate` and `npm run db:push`
 3. For development, you can use `npm run db:studio` to view your database
+
+### Redis Setup (Optional but Recommended)
+1. **For production performance**: Set up Upstash Redis credentials in your `.env`:
+   ```bash
+   UPSTASH_REDIS_REST_URL=https://your-redis-url.upstash.io
+   UPSTASH_REDIS_REST_TOKEN=your-redis-token-here
+   ```
+2. **For development**: The app works without Redis (graceful degradation)
+3. **Documentation**: See `REDIS.md` for complete setup guide
 
 ### Running the Project
 - `npm install`

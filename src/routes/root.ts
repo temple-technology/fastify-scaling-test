@@ -34,15 +34,97 @@ const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       await db.execute(sql`SELECT 1`);
       const dbLatency = Date.now() - start;
       
+      // Test Redis connection
+      const redisStart = Date.now();
+      await fastify.redis.ping();
+      const redisLatency = Date.now() - redisStart;
+      
       return { 
         status: 'healthy', 
         database: 'connected', 
-        latency: `${dbLatency}ms`,
+        redis: 'connected',
+        latency: {
+          database: `${dbLatency}ms`,
+          redis: `${redisLatency}ms`
+        },
         timestamp: new Date().toISOString() 
       };
     } catch (error) {
       reply.status(500);
-      return { status: 'unhealthy', database: 'disconnected', error: (error as Error).message };
+      return { status: 'unhealthy', error: (error as Error).message };
+    }
+  });
+
+  // ============================================================================
+  // CACHE MANAGEMENT ENDPOINTS
+  // ============================================================================
+
+  fastify.get('/api/cache/info', async (request, reply) => {
+    try {
+      // Test Redis connection
+      await fastify.redis.ping();
+      return { 
+        status: 'connected',
+        provider: 'Upstash Redis',
+        timestamp: new Date().toISOString()
+      };
+    } catch (error) {
+      reply.status(500);
+      return { error: 'Failed to get cache info', details: (error as Error).message };
+    }
+  });
+
+  fastify.post('/api/cache/clear', async (request, reply) => {
+    const { pattern } = request.body as { pattern?: string };
+    
+    try {
+      if (pattern) {
+        // Clear specific pattern (Note: Upstash Redis may have limitations on pattern matching)
+        await fastify.redis.del(pattern);
+        return { 
+          message: `Cache cleared for pattern: ${pattern}`,
+          timestamp: new Date().toISOString()
+        };
+      } else {
+        // Clear all cache (use with caution!)
+        await fastify.redis.flushall();
+        return { 
+          message: 'All cache cleared',
+          timestamp: new Date().toISOString()
+        };
+      }
+    } catch (error) {
+      reply.status(500);
+      return { error: 'Failed to clear cache', details: (error as Error).message };
+    }
+  });
+
+  fastify.get('/api/cache/stats', async (request, reply) => {
+    try {
+      // This is a simple stats endpoint - in production you might want more detailed metrics
+      const testKey = 'cache-test-key';
+      
+      // Test cache performance
+      const start = Date.now();
+      await fastify.cache.set(testKey, { test: true }, 60);
+      const setTime = Date.now() - start;
+      
+      const getStart = Date.now();
+      await fastify.cache.get(testKey);
+      const getTime = Date.now() - getStart;
+      
+      await fastify.cache.del(testKey);
+      
+      return {
+        performance: {
+          set_latency: `${setTime}ms`,
+          get_latency: `${getTime}ms`
+        },
+        timestamp: new Date().toISOString()
+      };
+    } catch (error) {
+      reply.status(500);
+      return { error: 'Failed to get cache stats', details: (error as Error).message };
     }
   });
 
@@ -51,52 +133,84 @@ const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   // ============================================================================
 
   fastify.get('/api/simple/categories', async (request, reply) => {
-    const result = await db.select({
-      id: categories.id,
-      name: categories.name,
-      slug: categories.slug
-    }).from(categories).where(eq(categories.isActive, true)).limit(50);
+    const cacheKey = fastify.cache.generateKey('simple', 'categories');
     
-    return { data: result, count: result.length, type: 'simple_query' };
+    const result = await fastify.cache.withCache(
+      cacheKey,
+      async () => {
+        return await db.select({
+          id: categories.id,
+          name: categories.name,
+          slug: categories.slug
+        }).from(categories).where(eq(categories.isActive, true)).limit(50);
+      },
+      3600 // Cache for 1 hour - categories don't change often
+    );
+    
+    return { data: result, count: result.length, type: 'simple_query', cached: true };
   });
 
   fastify.get('/api/simple/products', async (request, reply) => {
-    const result = await db.select({
-      id: products.id,
-      name: products.name,
-      price: products.price,
-      slug: products.slug
-    }).from(products).where(eq(products.isActive, true)).limit(20);
+    const cacheKey = fastify.cache.generateKey('simple', 'products');
     
-    return { data: result, count: result.length, type: 'simple_query' };
+    const result = await fastify.cache.withCache(
+      cacheKey,
+      async () => {
+        return await db.select({
+          id: products.id,
+          name: products.name,
+          price: products.price,
+          slug: products.slug
+        }).from(products).where(eq(products.isActive, true)).limit(20);
+      },
+      1800 // Cache for 30 minutes - products change more frequently
+    );
+    
+    return { data: result, count: result.length, type: 'simple_query', cached: true };
   });
 
   fastify.get('/api/simple/product/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
-    const result = await db.select().from(products).where(eq(products.id, parseInt(id))).limit(1);
+    const cacheKey = fastify.cache.generateKey('simple', 'product', id);
+    
+    const result = await fastify.cache.withCache(
+      cacheKey,
+      async () => {
+        return await db.select().from(products).where(eq(products.id, parseInt(id))).limit(1);
+      },
+      1800 // Cache individual products for 30 minutes
+    );
     
     if (result.length === 0) {
       reply.status(404);
       return { error: 'Product not found' };
     }
-    return { data: result[0], type: 'simple_query' };
+    return { data: result[0], type: 'simple_query', cached: true };
   });
 
   fastify.get('/api/simple/user/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
-    const result = await db.select({
-      id: users.id,
-      username: users.username,
-      email: users.email,
-      firstName: users.firstName,
-      lastName: users.lastName
-    }).from(users).where(eq(users.id, parseInt(id))).limit(1);
+    const cacheKey = fastify.cache.generateKey('simple', 'user', id);
+    
+    const result = await fastify.cache.withCache(
+      cacheKey,
+      async () => {
+        return await db.select({
+          id: users.id,
+          username: users.username,
+          email: users.email,
+          firstName: users.firstName,
+          lastName: users.lastName
+        }).from(users).where(eq(users.id, parseInt(id))).limit(1);
+      },
+      2400 // Cache user data for 40 minutes - relatively stable
+    );
     
     if (result.length === 0) {
       reply.status(404);
       return { error: 'User not found' };
     }
-    return { data: result[0], type: 'simple_query' };
+    return { data: result[0], type: 'simple_query', cached: true };
   });
 
   // ============================================================================
@@ -106,41 +220,55 @@ const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   fastify.get('/api/medium/products-with-category', async (request, reply) => {
     const { page = 1, limit = 20 } = request.query as { page?: number; limit?: number };
     const offset = (page - 1) * limit;
+    const cacheKey = fastify.cache.generateKey('medium', 'products-with-category', `page-${page}`, `limit-${limit}`);
 
-    const result = await db.select({
-      id: products.id,
-      name: products.name,
-      price: products.price,
-      slug: products.slug,
-      categoryName: categories.name,
-      categorySlug: categories.slug,
-      stockQuantity: products.stockQuantity
-    })
-    .from(products)
-    .leftJoin(categories, eq(products.categoryId, categories.id))
-    .where(eq(products.isActive, true))
-    .limit(limit)
-    .offset(offset);
+    const result = await fastify.cache.withCache(
+      cacheKey,
+      async () => {
+        return await db.select({
+          id: products.id,
+          name: products.name,
+          price: products.price,
+          slug: products.slug,
+          categoryName: categories.name,
+          categorySlug: categories.slug,
+          stockQuantity: products.stockQuantity
+        })
+        .from(products)
+        .leftJoin(categories, eq(products.categoryId, categories.id))
+        .where(eq(products.isActive, true))
+        .limit(limit)
+        .offset(offset);
+      },
+      600 // Cache for 10 minutes - product data with joins
+    );
     
-    return { data: result, page, limit, count: result.length, type: 'medium_query' };
+    return { data: result, page, limit, count: result.length, type: 'medium_query', cached: true };
   });
 
   fastify.get('/api/medium/users-by-city/:city', async (request, reply) => {
     const { city } = request.params as { city: string };
+    const cacheKey = fastify.cache.generateKey('medium', 'users-by-city', city);
     
-    const result = await db.select({
-      id: users.id,
-      username: users.username,
-      email: users.email,
-      city: sql<string>`${users.profileData}->>'city'`,
-      age: sql<number>`(${users.profileData}->>'age')::int`,
-      theme: sql<string>`${users.profileData}->'preferences'->>'theme'`
-    })
-    .from(users)
-    .where(sql`${users.profileData}->>'city' = ${city}`)
-    .limit(50);
+    const result = await fastify.cache.withCache(
+      cacheKey,
+      async () => {
+        return await db.select({
+          id: users.id,
+          username: users.username,
+          email: users.email,
+          city: sql<string>`${users.profileData}->>'city'`,
+          age: sql<number>`(${users.profileData}->>'age')::int`,
+          theme: sql<string>`${users.profileData}->'preferences'->>'theme'`
+        })
+        .from(users)
+        .where(sql`${users.profileData}->>'city' = ${city}`)
+        .limit(50);
+      },
+      1200 // Cache for 20 minutes - user data by city is fairly stable
+    );
     
-    return { data: result, city, count: result.length, type: 'medium_query' };
+    return { data: result, city, count: result.length, type: 'medium_query', cached: true };
   });
 
   fastify.get('/api/medium/product-search', async (request, reply) => {
@@ -148,54 +276,72 @@ const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       q?: string; tag?: string; min_price?: number; max_price?: number; 
     };
     
-    let conditions = [eq(products.isActive, true)];
+    // Generate cache key based on search parameters
+    const searchParams = [q || 'null', tag || 'null', min_price || 'null', max_price || 'null'].join('-');
+    const cacheKey = fastify.cache.generateKey('medium', 'product-search', searchParams);
     
-    if (q) {
-      conditions.push(sql`${products.name} ILIKE ${`%${q}%`}`);
-    }
-    if (tag) {
-      conditions.push(sql`${products.metadata}->'tags' @> ${JSON.stringify([tag])}`);
-    }
-    if (min_price) {
-      conditions.push(sql`${products.price}::numeric >= ${min_price}`);
-    }
-    if (max_price) {
-      conditions.push(sql`${products.price}::numeric <= ${max_price}`);
-    }
+    const result = await fastify.cache.withCache(
+      cacheKey,
+      async () => {
+        let conditions = [eq(products.isActive, true)];
+        
+        if (q) {
+          conditions.push(sql`${products.name} ILIKE ${`%${q}%`}`);
+        }
+        if (tag) {
+          conditions.push(sql`${products.metadata}->'tags' @> ${JSON.stringify([tag])}`);
+        }
+        if (min_price) {
+          conditions.push(sql`${products.price}::numeric >= ${min_price}`);
+        }
+        if (max_price) {
+          conditions.push(sql`${products.price}::numeric <= ${max_price}`);
+        }
 
-    const query = db.select({
-      id: products.id,
-      name: products.name,
-      price: products.price,
-      slug: products.slug,
-      brand: sql<string>`${products.metadata}->>'brand'`,
-      tags: sql<string[]>`${products.metadata}->'tags'`
-    }).from(products).where(and(...conditions));
+        const query = db.select({
+          id: products.id,
+          name: products.name,
+          price: products.price,
+          slug: products.slug,
+          brand: sql<string>`${products.metadata}->>'brand'`,
+          tags: sql<string[]>`${products.metadata}->'tags'`
+        }).from(products).where(and(...conditions));
 
-    const result = await query.limit(30);
-    return { data: result, filters: { q, tag, min_price, max_price }, count: result.length, type: 'medium_query' };
+        return await query.limit(30);
+      },
+      300 // Cache search results for 5 minutes - search results change more frequently
+    );
+    
+    return { data: result, filters: { q, tag, min_price, max_price }, count: result.length, type: 'medium_query', cached: true };
   });
 
   fastify.get('/api/medium/user-orders/:userId', async (request, reply) => {
     const { userId } = request.params as { userId: string };
     const { limit = 10 } = request.query as { limit?: number };
+    const cacheKey = fastify.cache.generateKey('medium', 'user-orders', userId, `limit-${limit}`);
 
-    const result = await db.select({
-      orderId: orders.id,
-      orderNumber: orders.orderNumber,
-      status: orders.status,
-      totalAmount: orders.totalAmount,
-      itemCount: count(orderItems.id),
-      createdAt: orders.createdAt
-    })
-    .from(orders)
-    .leftJoin(orderItems, eq(orders.id, orderItems.orderId))
-    .where(eq(orders.userId, parseInt(userId)))
-    .groupBy(orders.id)
-    .orderBy(desc(orders.createdAt))
-    .limit(limit);
+    const result = await fastify.cache.withCache(
+      cacheKey,
+      async () => {
+        return await db.select({
+          orderId: orders.id,
+          orderNumber: orders.orderNumber,
+          status: orders.status,
+          totalAmount: orders.totalAmount,
+          itemCount: count(orderItems.id),
+          createdAt: orders.createdAt
+        })
+        .from(orders)
+        .leftJoin(orderItems, eq(orders.id, orderItems.orderId))
+        .where(eq(orders.userId, parseInt(userId)))
+        .groupBy(orders.id)
+        .orderBy(desc(orders.createdAt))
+        .limit(limit);
+      },
+      180 // Cache user orders for 3 minutes - orders can change frequently
+    );
 
-    return { data: result, userId, count: result.length, type: 'medium_query' };
+    return { data: result, userId, count: result.length, type: 'medium_query', cached: true };
   });
 
   // ============================================================================
@@ -205,200 +351,239 @@ const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   fastify.get('/api/complex/user-profile/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
     const userId = parseInt(id);
+    const cacheKey = fastify.cache.generateKey('complex', 'user-profile', id);
 
-    const userProfile = await db.select({
-      id: users.id,
-      username: users.username,
-      email: users.email,
-      profileData: users.profileData,
-      orderCount: count(orders.id),
-      totalSpent: sum(orders.totalAmount),
-      avgOrderValue: avg(orders.totalAmount),
-      lastOrderDate: sql<Date>`MAX(${orders.createdAt})`,
-      reviewCount: sql<number>`COUNT(DISTINCT ${reviews.id})`,
-      avgGivenRating: sql<number>`AVG(${reviews.rating})`
-    })
-    .from(users)
-    .leftJoin(orders, eq(users.id, orders.userId))
-    .leftJoin(reviews, eq(users.id, reviews.userId))
-    .where(eq(users.id, userId))
-    .groupBy(users.id);
+    const userProfile = await fastify.cache.withCache(
+      cacheKey,
+      async () => {
+        return await db.select({
+          id: users.id,
+          username: users.username,
+          email: users.email,
+          profileData: users.profileData,
+          orderCount: count(orders.id),
+          totalSpent: sum(orders.totalAmount),
+          avgOrderValue: avg(orders.totalAmount),
+          lastOrderDate: sql<Date>`MAX(${orders.createdAt})`,
+          reviewCount: sql<number>`COUNT(DISTINCT ${reviews.id})`,
+          avgGivenRating: sql<number>`AVG(${reviews.rating})`
+        })
+        .from(users)
+        .leftJoin(orders, eq(users.id, orders.userId))
+        .leftJoin(reviews, eq(users.id, reviews.userId))
+        .where(eq(users.id, userId))
+        .groupBy(users.id);
+      },
+      120 // Cache for 2 minutes - complex analytics can change with new orders/reviews
+    );
 
     if (userProfile.length === 0) {
       reply.status(404);
       return { error: 'User not found' };
     }
 
-    return { data: userProfile[0], type: 'complex_query' };
+    return { data: userProfile[0], type: 'complex_query', cached: true };
   });
 
   fastify.get('/api/complex/product-analytics/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
     const productId = parseInt(id);
+    const cacheKey = fastify.cache.generateKey('complex', 'product-analytics', id);
 
-    const analytics = await db.select({
-      product: {
-        id: products.id,
-        name: products.name,
-        price: products.price,
-        categoryName: categories.name
+    const analytics = await fastify.cache.withCache(
+      cacheKey,
+      async () => {
+        return await db.select({
+          product: {
+            id: products.id,
+            name: products.name,
+            price: products.price,
+            categoryName: categories.name
+          },
+          sales: {
+            totalSold: sql<number>`COALESCE(SUM(${orderItems.quantity}), 0)`,
+            revenue: sql<number>`COALESCE(SUM(${orderItems.totalPrice}::numeric), 0)`,
+            uniqueCustomers: sql<number>`COUNT(DISTINCT ${orders.userId})`
+          },
+          reviews: {
+            avgRating: sql<number>`COALESCE(AVG(${reviews.rating}), 0)`,
+            totalReviews: count(reviews.id),
+            ratingDistribution: sql<any>`
+              jsonb_build_object(
+                '5_star', COUNT(CASE WHEN ${reviews.rating} = 5 THEN 1 END),
+                '4_star', COUNT(CASE WHEN ${reviews.rating} = 4 THEN 1 END),
+                '3_star', COUNT(CASE WHEN ${reviews.rating} = 3 THEN 1 END),
+                '2_star', COUNT(CASE WHEN ${reviews.rating} = 2 THEN 1 END),
+                '1_star', COUNT(CASE WHEN ${reviews.rating} = 1 THEN 1 END)
+              )`
+          }
+        })
+        .from(products)
+        .leftJoin(categories, eq(products.categoryId, categories.id))
+        .leftJoin(orderItems, eq(products.id, orderItems.productId))
+        .leftJoin(orders, eq(orderItems.orderId, orders.id))
+        .leftJoin(reviews, eq(products.id, reviews.productId))
+        .where(eq(products.id, productId))
+        .groupBy(products.id, categories.name);
       },
-      sales: {
-        totalSold: sql<number>`COALESCE(SUM(${orderItems.quantity}), 0)`,
-        revenue: sql<number>`COALESCE(SUM(${orderItems.totalPrice}::numeric), 0)`,
-        uniqueCustomers: sql<number>`COUNT(DISTINCT ${orders.userId})`
-      },
-      reviews: {
-        avgRating: sql<number>`COALESCE(AVG(${reviews.rating}), 0)`,
-        totalReviews: count(reviews.id),
-        ratingDistribution: sql<any>`
-          jsonb_build_object(
-            '5_star', COUNT(CASE WHEN ${reviews.rating} = 5 THEN 1 END),
-            '4_star', COUNT(CASE WHEN ${reviews.rating} = 4 THEN 1 END),
-            '3_star', COUNT(CASE WHEN ${reviews.rating} = 3 THEN 1 END),
-            '2_star', COUNT(CASE WHEN ${reviews.rating} = 2 THEN 1 END),
-            '1_star', COUNT(CASE WHEN ${reviews.rating} = 1 THEN 1 END)
-          )`
-      }
-    })
-    .from(products)
-    .leftJoin(categories, eq(products.categoryId, categories.id))
-    .leftJoin(orderItems, eq(products.id, orderItems.productId))
-    .leftJoin(orders, eq(orderItems.orderId, orders.id))
-    .leftJoin(reviews, eq(products.id, reviews.productId))
-    .where(eq(products.id, productId))
-    .groupBy(products.id, categories.name);
+      180 // Cache for 3 minutes - product analytics are expensive but change with sales
+    );
 
     if (analytics.length === 0) {
       reply.status(404);
       return { error: 'Product not found' };
     }
 
-    return { data: analytics[0], type: 'complex_query' };
+    return { data: analytics[0], type: 'complex_query', cached: true };
   });
 
   fastify.get('/api/complex/dashboard-stats', async (request, reply) => {
     const { days = 30 } = request.query as { days?: number };
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - Math.abs(days));
-    // Format as YYYY-MM-DDTHH:mm:ssZ (no milliseconds)
-    const cutoffDateStr = '2020-01-01T00:00:00Z'; // TEMP: hardcoded for debug
+    const cacheKey = fastify.cache.generateKey('complex', 'dashboard-stats', `days-${days}`);
 
-    // Multiple complex queries for dashboard
-    const [orderStats, userStatsRaw, productStats, topCityResult] = await Promise.all([
-      // Order analytics
-      db.select({
-        totalOrders: count(orders.id),
-        totalRevenue: sum(orders.totalAmount),
-        avgOrderValue: avg(orders.totalAmount),
-        pendingOrders: sql<number>`COUNT(CASE WHEN ${orders.status} = 'pending' THEN 1 END)`,
-        completedOrders: sql<number>`COUNT(CASE WHEN ${orders.status} = 'delivered' THEN 1 END)`
-      })
-      .from(orders)
-      .where(gte(orders.createdAt, cutoffDate)),
+    const result = await fastify.cache.withCache(
+      cacheKey,
+      async () => {
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - Math.abs(days));
+        // Format as YYYY-MM-DDTHH:mm:ssZ (no milliseconds)
+        const cutoffDateStr = '2020-01-01T00:00:00Z'; // TEMP: hardcoded for debug
 
-      // User analytics (main stats)
-      db.select({
-        activeUsers: sql<number>`COUNT(DISTINCT ${userActivity.userId})`,
-        newUsers: sql<number>`COUNT(DISTINCT CASE WHEN ${users.createdAt} >= ${cutoffDateStr} THEN ${users.id} END)`,
-        avgAge: sql<number>`AVG((${users.profileData}->>'age')::int)`
-      })
-      .from(users)
-      .leftJoin(userActivity, eq(users.id, userActivity.userId)),
+        // Multiple complex queries for dashboard
+        const [orderStats, userStatsRaw, productStats, topCityResult] = await Promise.all([
+          // Order analytics
+          db.select({
+            totalOrders: count(orders.id),
+            totalRevenue: sum(orders.totalAmount),
+            avgOrderValue: avg(orders.totalAmount),
+            pendingOrders: sql<number>`COUNT(CASE WHEN ${orders.status} = 'pending' THEN 1 END)`,
+            completedOrders: sql<number>`COUNT(CASE WHEN ${orders.status} = 'delivered' THEN 1 END)`
+          })
+          .from(orders)
+          .where(gte(orders.createdAt, cutoffDate)),
 
-      // Product analytics
-      db.select({
-        totalProducts: count(products.id),
-        avgPrice: avg(sql<number>`${products.price}::numeric`),
-        lowStockCount: sql<number>`COUNT(CASE WHEN ${products.stockQuantity} < 10 THEN 1 END)`,
-        topCategory: sql<string>`
-          (SELECT c.name 
-           FROM categories c 
-           JOIN products p ON c.id = p.category_id 
-           GROUP BY c.name 
-           ORDER BY COUNT(p.id) DESC 
-           LIMIT 1)`
-      })
-      .from(products)
-      .where(eq(products.isActive, true)),
+          // User analytics (main stats)
+          db.select({
+            activeUsers: sql<number>`COUNT(DISTINCT ${userActivity.userId})`,
+            newUsers: sql<number>`COUNT(DISTINCT CASE WHEN ${users.createdAt} >= ${cutoffDateStr} THEN ${users.id} END)`,
+            avgAge: sql<number>`AVG((${users.profileData}->>'age')::int)`
+          })
+          .from(users)
+          .leftJoin(userActivity, eq(users.id, userActivity.userId)),
 
-      // Top city (separate query)
-      db.select({
-        city: sql<string>`(profile_data->>'city')`
-      })
-      .from(users)
-      .groupBy(sql`(profile_data->>'city')`)
-      .orderBy(sql`COUNT(*) DESC`)
-      .limit(1)
-    ]);
+          // Product analytics
+          db.select({
+            totalProducts: count(products.id),
+            avgPrice: avg(sql<number>`${products.price}::numeric`),
+            lowStockCount: sql<number>`COUNT(CASE WHEN ${products.stockQuantity} < 10 THEN 1 END)`,
+            topCategory: sql<string>`
+              (SELECT c.name 
+               FROM categories c 
+               JOIN products p ON c.id = p.category_id 
+               GROUP BY c.name 
+               ORDER BY COUNT(p.id) DESC 
+               LIMIT 1)`
+          })
+          .from(products)
+          .where(eq(products.isActive, true)),
 
-    // Merge userStats and topCity
-    const userStats = { ...userStatsRaw[0], topCity: topCityResult[0]?.city || null };
+          // Top city (separate query)
+          db.select({
+            city: sql<string>`(profile_data->>'city')`
+          })
+          .from(users)
+          .groupBy(sql`(profile_data->>'city')`)
+          .orderBy(sql`COUNT(*) DESC`)
+          .limit(1)
+        ]);
+
+        // Merge userStats and topCity
+        const userStats = { ...userStatsRaw[0], topCity: topCityResult[0]?.city || null };
+
+        return { 
+          orders: orderStats[0], 
+          users: userStats, 
+          products: productStats[0] 
+        };
+      },
+      150 // Cache for 2.5 minutes - dashboard stats are very expensive but need to be fairly fresh
+    );
 
     return { 
-      data: { orders: orderStats[0], users: userStats, products: productStats[0] }, 
+      data: result, 
       period: `${days} days`,
-      type: 'complex_query'
+      type: 'complex_query',
+      cached: true
     };
   });
 
   fastify.get('/api/complex/top-performers', async (request, reply) => {
     const { limit = 10 } = request.query as { limit?: number };
+    const cacheKey = fastify.cache.generateKey('complex', 'top-performers', `limit-${limit}`);
 
-    const [topProducts, topUsers, topCategories] = await Promise.all([
-      // Top selling products
-      db.select({
-        productId: products.id,
-        productName: products.name,
-        totalSold: sql<number>`SUM(${orderItems.quantity})`,
-        revenue: sql<number>`SUM(${orderItems.totalPrice}::numeric)`,
-        avgRating: sql<number>`AVG(${reviews.rating})`
-      })
-      .from(products)
-      .leftJoin(orderItems, eq(products.id, orderItems.productId))
-      .leftJoin(reviews, eq(products.id, reviews.productId))
-      .groupBy(products.id)
-      .orderBy(desc(sql<number>`SUM(${orderItems.quantity})`))
-      .limit(limit),
+    const result = await fastify.cache.withCache(
+      cacheKey,
+      async () => {
+        const [topProducts, topUsers, topCategories] = await Promise.all([
+          // Top selling products
+          db.select({
+            productId: products.id,
+            productName: products.name,
+            totalSold: sql<number>`SUM(${orderItems.quantity})`,
+            revenue: sql<number>`SUM(${orderItems.totalPrice}::numeric)`,
+            avgRating: sql<number>`AVG(${reviews.rating})`
+          })
+          .from(products)
+          .leftJoin(orderItems, eq(products.id, orderItems.productId))
+          .leftJoin(reviews, eq(products.id, reviews.productId))
+          .groupBy(products.id)
+          .orderBy(desc(sql<number>`SUM(${orderItems.quantity})`))
+          .limit(limit),
 
-      // Top spending users
-      db.select({
-        userId: users.id,
-        username: users.username,
-        totalSpent: sql<number>`SUM(${orders.totalAmount}::numeric)`,
-        orderCount: count(orders.id),
-        avgOrderValue: sql<number>`AVG(${orders.totalAmount}::numeric)`,
-        city: sql<string>`${users.profileData}->>'city'`
-      })
-      .from(users)
-      .leftJoin(orders, eq(users.id, orders.userId))
-      .groupBy(users.id)
-      .orderBy(desc(sql<number>`SUM(${orders.totalAmount}::numeric)`))
-      .limit(limit),
+          // Top spending users
+          db.select({
+            userId: users.id,
+            username: users.username,
+            totalSpent: sql<number>`SUM(${orders.totalAmount}::numeric)`,
+            orderCount: count(orders.id),
+            avgOrderValue: sql<number>`AVG(${orders.totalAmount}::numeric)`,
+            city: sql<string>`${users.profileData}->>'city'`
+          })
+          .from(users)
+          .leftJoin(orders, eq(users.id, orders.userId))
+          .groupBy(users.id)
+          .orderBy(desc(sql<number>`SUM(${orders.totalAmount}::numeric)`))
+          .limit(limit),
 
-      // Top categories by revenue
-      db.select({
-        categoryId: categories.id,
-        categoryName: categories.name,
-        productCount: count(products.id),
-        totalRevenue: sql<number>`SUM(${orderItems.totalPrice}::numeric)`,
-        avgProductPrice: sql<number>`AVG(${products.price}::numeric)`
-      })
-      .from(categories)
-      .leftJoin(products, eq(categories.id, products.categoryId))
-      .leftJoin(orderItems, eq(products.id, orderItems.productId))
-      .groupBy(categories.id)
-      .orderBy(desc(sql<number>`SUM(${orderItems.totalPrice}::numeric)`))
-      .limit(limit)
-    ]);
+          // Top categories by revenue
+          db.select({
+            categoryId: categories.id,
+            categoryName: categories.name,
+            productCount: count(products.id),
+            totalRevenue: sql<number>`SUM(${orderItems.totalPrice}::numeric)`,
+            avgProductPrice: sql<number>`AVG(${products.price}::numeric)`
+          })
+          .from(categories)
+          .leftJoin(products, eq(categories.id, products.categoryId))
+          .leftJoin(orderItems, eq(products.id, orderItems.productId))
+          .groupBy(categories.id)
+          .orderBy(desc(sql<number>`SUM(${orderItems.totalPrice}::numeric)`))
+          .limit(limit)
+        ]);
+
+        return { 
+          topProducts: topProducts.filter(p => p.totalSold > 0),
+          topUsers: topUsers.filter(u => u.totalSpent > 0),
+          topCategories: topCategories.filter(c => c.totalRevenue > 0)
+        };
+      },
+      240 // Cache for 4 minutes - top performers change with new sales but are expensive
+    );
 
     return { 
-      data: { 
-        topProducts: topProducts.filter(p => p.totalSold > 0),
-        topUsers: topUsers.filter(u => u.totalSpent > 0),
-        topCategories: topCategories.filter(c => c.totalRevenue > 0)
-      }, 
-      type: 'complex_query' 
+      data: result, 
+      type: 'complex_query',
+      cached: true
     };
   });
 
@@ -471,10 +656,18 @@ const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
         isApproved: true
       }).returning();
 
+      // Invalidate related cache entries
+      await Promise.all([
+        fastify.cache.del(fastify.cache.generateKey('complex', 'product-analytics', product[0].id.toString())),
+        fastify.cache.del(fastify.cache.generateKey('complex', 'top-performers', 'limit-10')),
+        fastify.cache.del(fastify.cache.generateKey('complex', 'dashboard-stats', 'days-30'))
+      ]);
+
       return { 
         message: 'Review added', 
         data: { review: review[0], product: product[0] }, 
-        type: 'medium_mutation' 
+        type: 'medium_mutation',
+        cache_invalidated: true
       };
 
     } catch (error) {
@@ -653,6 +846,18 @@ const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
         userAgent: request.headers['user-agent'] || 'load-test-agent'
       });
 
+      // Invalidate related cache entries after order creation
+      await Promise.all([
+        fastify.cache.del(fastify.cache.generateKey('complex', 'user-profile', user[0].id.toString())),
+        fastify.cache.del(fastify.cache.generateKey('medium', 'user-orders', user[0].id.toString(), 'limit-10')),
+        fastify.cache.del(fastify.cache.generateKey('complex', 'dashboard-stats', 'days-30')),
+        fastify.cache.del(fastify.cache.generateKey('complex', 'top-performers', 'limit-10')),
+        // Invalidate product analytics for all ordered products
+        ...orderItemsToCreate.map(item => 
+          fastify.cache.del(fastify.cache.generateKey('complex', 'product-analytics', item.productId.toString()))
+        )
+      ]);
+
       return { 
         message: 'Order created successfully', 
         data: {
@@ -661,7 +866,8 @@ const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
           user: user[0],
           totals: { subtotal, tax, shipping, total }
         },
-        type: 'complex_mutation'
+        type: 'complex_mutation',
+        cache_invalidated: true
       };
 
     } catch (error) {

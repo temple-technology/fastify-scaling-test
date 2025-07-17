@@ -1,3 +1,4 @@
+import 'dotenv/config'; 
 import Fastify from 'fastify';
 import AutoLoad, { AutoloadPluginOptions } from '@fastify/autoload';
 import { join, dirname } from 'path';
@@ -14,7 +15,6 @@ const fastify = Fastify({
   }
 });
 
-// Enable CORS for the React app
 const corsOrigin = process.env.CORS_ORIGIN || true;
 fastify.register(cors, {
   origin: corsOrigin,
@@ -23,7 +23,6 @@ fastify.register(cors, {
 });
 
 const pluginOptions: Partial<AutoloadPluginOptions> = {
-  // Place your custom options the autoload plugin below here.
 }
 
 fastify.register(AutoLoad, {
