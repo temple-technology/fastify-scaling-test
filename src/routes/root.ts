@@ -191,12 +191,13 @@ const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       
        let dbPoolStats;
        try {
+         const poolInternal = pool as any;
          dbPoolStats = {
-           totalConnections: pool.totalCount || 'unknown',
-           idleConnections: pool.idleCount || 'unknown', 
-           waitingClients: pool.waitingCount || 'unknown',
-           maxConnections: pool.options.max || 'unknown',
-           minConnections: pool.options.min || 'unknown'
+           totalConnections: poolInternal._clients?.length || 0,
+           idleConnections: poolInternal._idle?.length || 0, 
+           waitingClients: poolInternal._pendingQueue?.length || 0,
+           maxConnections: pool.options.max || 75,
+           minConnections: pool.options.min || 10
          };
        } catch (poolError) {
          dbPoolStats = {
