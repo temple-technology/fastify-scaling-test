@@ -1,7 +1,7 @@
 // src/routes/index.ts
 import { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { eq, desc, and, gte, sql, count, avg, sum, inArray } from 'drizzle-orm';
-import { db } from '../db/connection.js';
+import { db, pool } from '../db/connection.js';
 import { 
   users, 
   categories, 
@@ -87,14 +87,20 @@ const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       results.db_inspection_error = (error as Error).message;
     }
     
-    // Test 4: Pool object access
     try {
-      results.pool_exists = !!(db as any)?.pool;
-      results.pool_type = typeof (db as any)?.pool;
-      if ((db as any)?.pool) {
-        results.pool_keys = Object.keys((db as any).pool).slice(0, 10);
-        results.pool_totalCount = (db as any)?.pool?.totalCount;
-        results.pool_idleCount = (db as any)?.pool?.idleCount;
+      results.drizzle_pool_exists = !!(db as any)?.pool;
+      results.drizzle_pool_type = typeof (db as any)?.pool;
+      
+      results.direct_pool_exists = !!pool;
+      results.direct_pool_type = typeof pool;
+      if (pool) {
+        results.pool_stats = {
+          totalCount: pool.totalCount,
+          idleCount: pool.idleCount,
+          waitingCount: pool.waitingCount,
+          maxConnections: pool.options?.max,
+          minConnections: pool.options?.min
+        };
       }
       results.pool_access_success = true;
     } catch (error) {
@@ -183,19 +189,21 @@ const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       const memUsage = process.memoryUsage();
       const cpuUsage = process.cpuUsage();
       
-      // Get database pool stats if available - with error handling
-      let dbPoolStats;
-      try {
-        dbPoolStats = {
-          totalConnections: (db as any)?.pool?.totalCount || 'unknown',
-          idleConnections: (db as any)?.pool?.idleCount || 'unknown',
-          waitingClients: (db as any)?.pool?.waitingCount || 'unknown'
-        };
-      } catch (poolError) {
-        dbPoolStats = {
-          status: 'pool_stats_unavailable_under_load'
-        };
-      }
+       let dbPoolStats;
+       try {
+         dbPoolStats = {
+           totalConnections: pool.totalCount || 'unknown',
+           idleConnections: pool.idleCount || 'unknown', 
+           waitingClients: pool.waitingCount || 'unknown',
+           maxConnections: pool.options.max || 'unknown',
+           minConnections: pool.options.min || 'unknown'
+         };
+       } catch (poolError) {
+         dbPoolStats = {
+           status: 'pool_stats_unavailable_under_load',
+           error: (poolError as Error).message
+         };
+       }
 
       return {
         server: {
