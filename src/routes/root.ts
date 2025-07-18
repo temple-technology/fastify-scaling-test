@@ -432,12 +432,7 @@ const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     const result = await fastify.cache.withCache(
       cacheKey,
       async () => {
-        // Add query timeout to prevent connection pool starvation
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Query timeout - products with category')), 8000)
-        );
-
-        const queryPromise = db.select({
+        return await db.select({
           id: products.id,
           name: products.name,
           price: products.price,
@@ -451,9 +446,6 @@ const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
         .where(eq(products.isActive, true))
         .limit(limit)
         .offset(offset);
-
-        // Race the query against the timeout
-        return await Promise.race([queryPromise, timeoutPromise]) as any[];
       },
       600 // Cache for 10 minutes - product data with joins
     );
@@ -792,7 +784,7 @@ const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
           topCategories: topCategories.filter(c => c.totalRevenue > 0)
         };
       },
-      900 // Cache for 15 minutes - top performers change slowly but are very expensive
+      240 // Cache for 4 minutes - top performers change with new sales but are expensive
     );
 
     return { 
