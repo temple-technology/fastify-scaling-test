@@ -5,23 +5,54 @@ import { eq } from 'drizzle-orm';
 
 const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
 
+  // ---- Global timing hooks (total server time) ----
+  fastify.addHook('onRequest', (req, _reply, done) => {
+    (req as any)._t0 = process.hrtime.bigint();
+    done();
+  });
+
+  fastify.addHook('onSend', (req, reply, payload, done) => {
+    const t0 = (req as any)._t0;
+    if (t0) {
+      const totalMs = Number(process.hrtime.bigint() - t0) / 1e6;
+      reply.header('X-Server-Time', totalMs.toFixed(2));
+    }
+    done(null, payload);
+  });
+
   function randId() {
     return (Math.random() * 10000 | 0) + 1; // 1..10000
   }
 
-  // 1. Single row fetch (raw)
+  // 1. Single row fetch (raw) + pool/query timings
   fastify.get('/world/:id', async (request, reply) => {
     const id = Number((request.params as any).id);
     if (!Number.isInteger(id) || id < 1 || id > 10000) return reply.code(400).send();
-    const { rows } = await pool.query(
-      'SELECT id, "randomNumber" FROM world WHERE id = $1',
-      [id]
-    );
+
+    const w0 = process.hrtime.bigint();
+    const client = await pool.connect();
+    const waitMs = Number(process.hrtime.bigint() - w0) / 1e6;
+
+    let rows;
+    const q0 = process.hrtime.bigint();
+    try {
+      const res = await client.query(
+        'SELECT id, "randomNumber" FROM world WHERE id = $1',
+        [id]
+      );
+      rows = res.rows;
+    } finally {
+      const queryMs = Number(process.hrtime.bigint() - q0) / 1e6;
+      client.release();
+      reply.header('X-Pool-Wait', waitMs.toFixed(2))
+           .header('X-DB-Time', queryMs.toFixed(2));
+    }
+
     if (!rows[0]) return reply.code(404).send();
     return rows[0];
   });
 
-  // 2. Multiple queries (N random rows) - parallel selects
+  // 2. Multiple queries (N random rows) - parallel selects (no extra headers here to keep overhead low)
   fastify.get('/queries', async (request, reply) => {
     let n = Number((request.query as any).count) || 1;
     if (n < 1) n = 1;
@@ -30,17 +61,15 @@ const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       pool.query('SELECT id, "randomNumber" FROM world WHERE id = $1', [randId()])
         .then(r => r.rows[0])
     );
-    const results = await Promise.all(promises);
-    return results;
+    return Promise.all(promises);
   });
 
-  // 3. Updates (read N then write N) inside one transaction
+  // 3. Updates (read N then write N) inside one transaction (could add timing similarly later)
   fastify.get('/updates', async (request, reply) => {
     let n = Number((request.query as any).count) || 1;
     if (n < 1) n = 1;
     if (n > 500) n = 500;
 
-    // Fetch rows in parallel first
     const selected = await Promise.all(
       Array.from({ length: n }, () =>
         pool.query('SELECT id, "randomNumber" FROM world WHERE id = $1', [randId()])
@@ -51,7 +80,6 @@ const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      // Optionally randomize update ordering to reduce hot spot ordering bias
       for (const r of selected) {
         const newVal = randId();
         await client.query('UPDATE world SET "randomNumber" = $1 WHERE id = $2', [newVal, r.id]);
@@ -75,7 +103,7 @@ const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     return rows;
   });
 
-  // Health check (simple, cheap)
+  // Health check
   fastify.get('/health', async (_req, reply) => {
     try {
       await pool.query('SELECT 1');
@@ -93,9 +121,17 @@ const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     backend: 'ready'
   }));
 
+  // Drizzle comparison route with timings
   fastify.get('/world_drizzle/:id', async (req, reply) => {
     const id = Number((req.params as any).id);
+    if (!Number.isInteger(id) || id < 1 || id > 10000) return reply.code(400).send();
+
+    // measure whole DB call via drizzle (no pool.wait separate unless you wrap)
+    const w0 = process.hrtime.bigint();
     const rows = await db.select().from(world).where(eq(world.id, id)).limit(1);
+    const qMs = Number(process.hrtime.bigint() - w0) / 1e6;
+    reply.header('X-DB-Time', qMs.toFixed(2)).header('X-Pool-Wait', '0.00'); // drizzle hides wait; treat as 0 for now
+
     if (!rows[0]) return reply.code(404).send();
     return rows[0];
   });
