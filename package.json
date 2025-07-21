@@ -7,7 +7,7 @@
     "esm": true
   },
   "scripts": {
-    "start": "fastify start ./dist/app.js -o cluster -w 8 -l info",
+    "start": "node dist/server.js",
     "build": "tsc",
     "dev": "nodemon --watch src --exec \"node --loader ts-node/esm src/app.ts\"",
     "db:generate": "drizzle-kit generate",
