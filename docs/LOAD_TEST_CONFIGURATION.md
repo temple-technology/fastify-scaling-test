@@ -2,7 +2,7 @@
 *Understanding every setting that affects high-load performance*
 
 ## Table of Contents
-1. [API Layer Settings (Fastify + Drizzle)](#api-layer-settings)
+1. [API Layer Settings (Fastify + Drizzle)](#api-layer-settings-fastify--drizzle)
 2. [PGPool Connection Manager](#pgpool-connection-manager)
 3. [PostgreSQL Database Settings](#postgresql-database-settings)
 4. [System-Level Factors](#system-level-factors)
