@@ -161,7 +161,7 @@
 
 ### Health Monitoring
 
-#### `PGPOOL_HEALTH_CHECK_PERIOD` (Default: 30 seconds)
+#### `PGPOOL_HEALTH_CHECK_PERIOD` (Current: using default 30 seconds)
 **What it does**: How often PGPool sends health check queries to each PostgreSQL node.
 
 **Technical explanation**: Every 30 seconds, PGPool sends a simple query to each backend node to verify it's responsive and healthy.
@@ -340,18 +340,18 @@ PREPARE TRANSACTION 'payment_123'; -- Wait for external confirmation
 
 ### 1. Connection Pooler Settings Not Currently Configured
 
-#### `PGPOOL_CHILD_LIFE_TIME` (Default: 5400 seconds)
-**What it does**: How long a PGPool child process lives before being recycled.
+#### `PGPOOL_CHILD_LIFE_TIME` (Env: 5400 seconds, default: 300 seconds)
+**What it does**: How long a PGPool child process lives before being recycled (PGPool default is 300 seconds/5 minutes).
 **Why it matters**: Prevents memory leaks and ensures fresh processes during long-running load tests.
 **Recommendation**: Setting to 5400 (1.5 hours) provides longer duration than connection lifetime (1800s).
 
-#### `PGPOOL_CHILD_MAX_CONNECTIONS` (Default: 1000)
-**What it does**: Maximum number of connections a single child process handles before being recycled.
+#### `PGPOOL_CHILD_MAX_CONNECTIONS` (Env: 1000, default: 0/disabled)
+**What it does**: Maximum number of connections a single child process handles before being recycled (PGPool default is 0/disabled).
 **Why it matters**: Prevents memory accumulation in busy child processes.
 **Recommendation**: Set to 1000 to recycle child processes after handling 1000 connections.
 
-#### `PGPOOL_RESERVED_CONNECTIONS` (Default: 0)
-**What it does**: Reserves connection slots for superuser connections when at capacity.
+#### `PGPOOL_RESERVED_CONNECTIONS` (Env: 10, default: 0)
+**What it does**: Reserves connection slots for superuser connections when at capacity (PGPool default is 0).
 **Why it matters**: Ensures admin access during overload situations.
 **Recommendation**: Set to 5-10 for emergency access during load tests.
 
@@ -430,15 +430,13 @@ The 30-minute PGPool recycling handles any connection staleness issues. The pers
 
 ### Q: Are the settings in the connection.ts file correctly configured?
 
-**A:** The runtime configuration is correct because environment variables override code defaults, but there are some discrepancies to note:
+**A:** The runtime configuration uses the following environment variable settings:
 
-**✅ Working correctly (env variables override defaults):**
-- `min: 75` (env: `DB_POOL_MIN="75"` overrides code default `'10'`)
-- `max: 100` (env: `DB_POOL_MAX="100"` overrides code default `'75'`)
-- `idleTimeoutMillis: 300000` (env overrides code default `'30000'`)
-- `statement_timeout: 10000` (env overrides code default `'30000'`)
-
-**⚠️ Misleading code defaults:** The fallback values in the code don't match the actual environment variables, which could cause confusion during debugging or in different environments.
+**✅ Current environment variable settings:**
+- `min: 75` (env: `DB_POOL_MIN="75"`, pg library default is 0)
+- `max: 100` (env: `DB_POOL_MAX="100"`, pg library default is 10)
+- `idleTimeoutMillis: 300000` (env: `DB_POOL_IDLE_TIMEOUT="300000"`, pg library default is 10000)
+- `statement_timeout: 10000` (env: `DB_STATEMENT_TIMEOUT="10000"`, PostgreSQL default is 0/disabled)
 
 **✅ Additional TCP optimizations:**
 - `keepAlive: true` - Maintains persistent connections and prevents timeouts
@@ -451,7 +449,6 @@ The 30-minute PGPool recycling handles any connection staleness issues. The pers
 - `release`: Connections returned to pool
 - `error`: Connection failures
 
-**Recommendation:** Update the code defaults to match the production environment variables to avoid confusion.
 
 ### Q: Are DB_POOL_CONNECTION_TIMEOUT="5000" and DB_STATEMENT_TIMEOUT="10000" sufficient for high load?
 
