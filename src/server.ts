@@ -41,9 +41,9 @@ if (cluster.isPrimary) {
     logger: {
       level: process.env.LOG_LEVEL || 'info'
     },
-    keepAliveTimeout: 65000,
-    connectionTimeout: 10000,
-    bodyLimit: 1048576,
+    keepAliveTimeout: parseInt(process.env.FASTIFY_KEEP_ALIVE_TIMEOUT || '90000'),
+    connectionTimeout: parseInt(process.env.FASTIFY_CONNECTION_TIMEOUT || '30000'),
+    bodyLimit: parseInt(process.env.FASTIFY_BODY_LIMIT || '1048576'),
     maxParamLength: 500,
     ignoreTrailingSlash: true,
     caseSensitive: false,
