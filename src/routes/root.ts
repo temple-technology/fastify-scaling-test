@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { db, pool } from '../db/connection.js';
 import { world } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
+import { register } from '../db/connection.js';
 
 const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
 
@@ -24,6 +25,11 @@ const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     return (Math.random() * 10000 | 0) + 1; // 1..10000
   }
 
+  // Prometheus metrics endpoint
+  fastify.get('/metrics', async (_req, reply) => {
+    reply.type(register.contentType).send(await register.metrics());
+  });
+  
   // 1. Single row fetch (raw) + pool/query timings
   fastify.get('/world/:id', async (request, reply) => {
     const id = Number((request.params as any).id);
@@ -112,6 +118,60 @@ const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       reply.code(500);
       return { status: 'unhealthy', error: e.message };
     }
+  });
+
+
+  // Load testing endpoint for monitoring (generates multiple DB calls)
+  fastify.get('/load-test', async (request, reply) => {
+    const concurrency = Number((request.query as any).concurrency) || 10;
+    const iterations = Number((request.query as any).iterations) || 100;
+    const delayMs = Number((request.query as any).delay) || 0; // Add delay parameter
+    
+    if (concurrency > 50 || iterations > 1000) {
+      return reply.code(400).send({ error: 'Limits: concurrency <= 50, iterations <= 1000' });
+    }
+
+    const startTime = process.hrtime.bigint();
+    const promises = [];
+
+    // Helper function to sleep
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+    for (let i = 0; i < concurrency; i++) {
+      promises.push(
+        (async () => {
+          const results = [];
+          for (let j = 0; j < iterations; j++) {
+            const id = Math.floor(Math.random() * 10000) + 1;
+            const result = await pool.query('SELECT id, "randomNumber" FROM world WHERE id = $1', [id]);
+            results.push(result.rows[0]);
+            
+            // Add delay between queries if specified
+            if (delayMs > 0) {
+              await sleep(delayMs);
+            }
+          }
+          return results;
+        })()
+      );
+    }
+
+    const allResults = await Promise.all(promises);
+    const endTime = process.hrtime.bigint();
+    const totalTimeMs = Number(endTime - startTime) / 1e6;
+
+    return {
+      message: 'Load test completed',
+      concurrency,
+      iterations,
+      totalQueries: concurrency * iterations,
+      totalTimeMs: totalTimeMs.toFixed(2),
+      avgTimePerQuery: (totalTimeMs / (concurrency * iterations)).toFixed(3),
+      resultsCount: allResults.flat().length,
+      delayBetweenQueries: delayMs + 'ms',
+      estimatedDuration: `${((iterations * delayMs) / 1000).toFixed(1)}s per worker`,
+      timestamp: new Date().toISOString()
+    };
   });
 
   fastify.get('/', async () => ({

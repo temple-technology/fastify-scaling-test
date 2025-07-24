@@ -1,16 +1,13 @@
+// db/connection.ts
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
-import * as schema from './schema.js';
-import 'dotenv/config';
+import { Registry, collectDefaultMetrics, Gauge } from 'prom-client';
 
-
-
-
-const pool = new Pool({
+export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   
-  max: parseInt(process.env.DB_POOL_MAX || '75'),
-  min: parseInt(process.env.DB_POOL_MIN || '10'),
+  max: parseInt(process.env.DB_POOL_MAX || '100'),
+  min: parseInt(process.env.DB_POOL_MIN || '75'),
   idleTimeoutMillis: parseInt(process.env.DB_POOL_IDLE_TIMEOUT || '30000'),
   connectionTimeoutMillis: parseInt(process.env.DB_POOL_CONNECTION_TIMEOUT || '5000'),
   
@@ -20,39 +17,63 @@ const pool = new Pool({
   keepAliveInitialDelayMillis: 10000,
   statement_timeout: parseInt(process.env.DB_STATEMENT_TIMEOUT || '30000'), 
 });
+export const db = drizzle(pool);
 
+export const register = new Registry();
+collectDefaultMetrics({ register });
 
-export const db = drizzle(pool, { schema });
+// ✅ Prevent re-registering metrics (hot reload / cluster forks)
+if (!(globalThis as any).__pgMetricsInit) {
+  const pgPoolSize = new Gauge({
+    name: 'pg_pool_size',
+    help: 'Current pool size (active + idle).',
+    registers: [register],
+    collect() { this.set(pool.totalCount); },
+  });
 
+  const pgPoolActive = new Gauge({
+    name: 'pg_pool_active_connections',
+    help: 'Active connections.',
+    registers: [register],
+    collect() { this.set(pool.totalCount - pool.idleCount); },
+  });
 
-export { pool };
+  const pgPoolIdle = new Gauge({
+    name: 'pg_pool_idle_connections',
+    help: 'Idle connections.',
+    registers: [register],
+    collect() { this.set(pool.idleCount); },
+  });
 
+  const pgPoolWaiting = new Gauge({
+    name: 'pg_pool_waiting_connections',
+    help: 'Waiting clients.',
+    registers: [register],
+    collect() { this.set(pool.waitingCount); },
+  });
 
-pool.on('connect', (client) => {
-  console.log('📊 New database connection established to PgPool cluster');
-});
+  const pgPoolErrors = new Gauge({
+    name: 'pg_pool_errors_total',
+    help: 'Total pool errors since start.',
+    registers: [register],
+  });
 
-pool.on('error', (err, client) => {
-  console.error('❌ Database connection error:', err);
-});
+  let errorCount = 0;
+  pool.on('error', (err) => {
+    errorCount += 1;
+    pgPoolErrors.set(errorCount);
+    console.error('❌ Database connection error:', err);
+  });
 
-pool.on('acquire', (client) => {
-  console.log('🔄 Database connection acquired from pool');
-});
+  (globalThis as any).__pgMetricsInit = true;
+}
 
-pool.on('release', (client) => {
-  console.log('🔓 Database connection released back to pool');
-});
+// (optional) monitorPgPool(pool, { register });
 
-
-process.on('SIGINT', async () => {
+async function closePool() {
   console.log('Closing database connections...');
   await pool.end();
   process.exit(0);
-});
-
-process.on('SIGTERM', async () => {
-  console.log('Closing database connections...');
-  await pool.end();
-  process.exit(0);
-}); 
+}
+process.on('SIGINT', closePool);
+process.on('SIGTERM', closePool);

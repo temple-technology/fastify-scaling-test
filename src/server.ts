@@ -10,9 +10,9 @@ const numCPUs = availableParallelism();
 if (cluster.isPrimary) {
   console.log(`🚀 Primary ${process.pid} is running`);
   
-  // Fork workers (configurable via WORKERS env var, default to CPU count, max 8 for Railway efficiency)
-  const maxWorkers = parseInt(process.env.WORKERS || '0') || Math.min(numCPUs, 8);
-  const numWorkers = Math.min(maxWorkers, 8);
+  // Fork workers (configurable via WORKERS env var, default to CPU count, max 12 for better I/O handling)
+  const maxWorkers = parseInt(process.env.WORKERS || '0') || Math.min(numCPUs, 12);
+  const numWorkers = Math.min(maxWorkers, 12);
   console.log(`🔥 Starting ${numWorkers} workers...`);
   for (let i = 0; i < numWorkers; i++) {
     cluster.fork();
@@ -41,8 +41,8 @@ if (cluster.isPrimary) {
     logger: {
       level: process.env.LOG_LEVEL || 'info'
     },
-    keepAliveTimeout: parseInt(process.env.FASTIFY_KEEP_ALIVE_TIMEOUT || '90000'),
-    connectionTimeout: parseInt(process.env.FASTIFY_CONNECTION_TIMEOUT || '30000'),
+    keepAliveTimeout: parseInt(process.env.FASTIFY_KEEP_ALIVE_TIMEOUT || '65000'),
+    connectionTimeout: parseInt(process.env.FASTIFY_CONNECTION_TIMEOUT || '20000'),
     bodyLimit: parseInt(process.env.FASTIFY_BODY_LIMIT || '1048576'),
     maxParamLength: 500,
     ignoreTrailingSlash: true,
