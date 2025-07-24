@@ -95,6 +95,35 @@
 
 **Impact on load testing**: Multiplies system capacity by 8, but also multiplies database connections and memory usage.
 
+### HTTP Server Configuration (Fastify)
+
+#### `FASTIFY_KEEP_ALIVE_TIMEOUT="90000"`
+**What it does**: How long HTTP connections stay open for reuse between requests (90 seconds).
+
+**Technical explanation**: After a request completes, the TCP connection remains open for 90 seconds, allowing subsequent requests from the same client to reuse the connection without establishing a new one.
+
+**Simple explanation**: Similar to keeping a phone line open for 90 seconds after a conversation ends, in case the same person calls back.
+
+**Impact on load testing**: Reduces connection establishment overhead during sustained load. With Railway's load balancer, this helps maintain efficient connection pooling between the load balancer and API instances. Aggressive setting optimized for high RPS.
+
+#### `FASTIFY_CONNECTION_TIMEOUT="30000"`
+**What it does**: Maximum time to wait for HTTP connection establishment (30 seconds).
+
+**Technical explanation**: When a client attempts to connect, the server will wait up to 30 seconds for the TCP handshake to complete before rejecting the connection.
+
+**Simple explanation**: Similar to waiting 30 seconds for someone to pick up the phone before hanging up.
+
+**Impact on load testing**: Coordinated with Railway's 15-minute load balancer timeout. The 30-second timeout prevents hanging connections during network issues while allowing sufficient time for connection establishment under load.
+
+#### `FASTIFY_BODY_LIMIT="1048576"`
+**What it does**: Maximum HTTP request body size that the server will accept (1MB).
+
+**Technical explanation**: Any POST, PUT, or PATCH request with a body larger than 1MB will be rejected with a 413 "Payload Too Large" error.
+
+**Simple explanation**: Similar to having a mailbox that can only accept letters up to 1MB in size.
+
+**Impact on load testing**: For typical JSON API operations, 1MB is sufficient for NFT metadata, user data, and transaction payloads. Large bulk operations may need higher limits.
+
 ---
 
 ## PGPool Connection Manager
@@ -119,6 +148,15 @@
 
 **Impact on load testing**: Higher values reduce connection establishment overhead but increase memory usage per child process.
 
+#### `PGPOOL_RESERVED_CONNECTIONS="10"`
+**What it does**: Reserves 10 connection slots for superuser connections when at capacity.
+
+**Technical explanation**: Even when all 800 child processes are busy, 10 slots remain available for administrative database connections.
+
+**Simple explanation**: Similar to keeping 10 VIP phone lines always available for emergency calls, even when all regular lines are busy.
+
+**Impact on load testing**: Ensures admin access for monitoring and emergency intervention during overload situations.
+
 ### Connection Lifecycle Management
 
 #### `PGPOOL_CLIENT_IDLE_LIMIT="600"`
@@ -130,14 +168,32 @@
 
 **Impact on load testing**: Must be longer than the API's idle timeout to prevent premature disconnections during traffic lulls.
 
-#### `PGPOOL_CONNECTION_LIFE_TIME="3600"`
-**What it does**: Maximum age (in seconds) for backend database connections before forced renewal (1 hour).
+#### `PGPOOL_CONNECTION_LIFE_TIME="1800"`
+**What it does**: Maximum age (in seconds) for backend database connections before forced renewal (1800 seconds = 30 minutes).
 
-**Technical explanation**: Every hour, connections to PostgreSQL are closed and recreated to prevent connection drift and resource leaks.
+**Technical explanation**: Every 30 minutes, connections to PostgreSQL are closed and recreated to prevent connection drift and resource leaks.
 
-**Simple explanation**: Similar to hanging up and redialing phone connections every hour to ensure they remain fresh and reliable.
+**Simple explanation**: Similar to hanging up and redialing phone connections every 30 minutes to ensure they remain fresh and reliable.
 
 **Impact on load testing**: Causes periodic reconnection overhead but prevents long-term connection issues.
+
+#### `PGPOOL_CHILD_LIFE_TIME="5400"`
+**What it does**: How long a PGPool child process lives before being recycled (5400 seconds = 1.5 hours).
+
+**Technical explanation**: Each of the 800 PGPool child processes is automatically terminated and recreated after handling requests for 1.5 hours.
+
+**Simple explanation**: Similar to rotating telephone operators every 1.5 hours to prevent fatigue and maintain performance.
+
+**Impact on load testing**: Prevents memory leaks and ensures fresh processes during long-running load tests. Setting of 1.5 hours provides longer duration than connection lifetime (1800s/30 minutes).
+
+#### `PGPOOL_CHILD_MAX_CONNECTIONS="1000"`
+**What it does**: Maximum number of connections a single child process handles before being recycled.
+
+**Technical explanation**: After a child process handles 1000 different client connections, it's terminated and a fresh process takes its place.
+
+**Simple explanation**: Similar to having a telephone operator take a break after handling 1000 calls to prevent burnout.
+
+**Impact on load testing**: Prevents memory accumulation in busy child processes during sustained high-load scenarios.
 
 ### Load Balancing Settings
 
@@ -161,25 +217,23 @@
 
 ### Health Monitoring
 
-#### `PGPOOL_HEALTH_CHECK_PERIOD` (Current: using default 30 seconds)
-**What it does**: How often PGPool sends health check queries to each PostgreSQL node.
+#### `PGPOOL_HEALTH_CHECK_PERIOD="10"`
+**What it does**: How often PGPool sends health check queries to each PostgreSQL node (10 seconds).
 
-**Technical explanation**: Every 30 seconds, PGPool sends a simple query to each backend node to verify it's responsive and healthy.
+**Technical explanation**: Every 10 seconds, PGPool sends a simple query to each backend node to verify it's responsive and healthy.
 
-**Simple explanation**: Similar to checking each database server's pulse every 30 seconds to ensure it remains alive and responding.
+**Simple explanation**: Similar to checking each database server's pulse every 10 seconds to ensure it remains alive and responding.
 
-**Impact on load testing**: More frequent checks (10-15s) provide faster failure detection during stress testing but create more overhead.
+**Impact on load testing**: More frequent checks provide faster failure detection during stress testing compared to the default 30-second interval.
 
-**Current setup**: Uses the default 30-second interval since this environment variable isn't explicitly set.
-
-#### `PGPOOL_HEALTH_CHECK_TIMEOUT="10"`
+#### `PGPOOL_HEALTH_CHECK_TIMEOUT="5"`
 **What it does**: Time (in seconds) to wait for a health check response from PostgreSQL nodes.
 
-**Technical explanation**: Every health check query must complete within 10 seconds or the node is considered unhealthy.
+**Technical explanation**: Each health check query must complete within 5 seconds or the node is considered unhealthy.
 
-**Simple explanation**: Similar to giving each database server 10 seconds to respond "I'm okay" when checked.
+**Simple explanation**: Similar to giving each database server 5 seconds to respond "I'm okay" when checked.
 
-**Impact on load testing**: Too short = false positive failures during high load; too long = slow failure detection.
+**Impact on load testing**: Balanced setting - not too short to cause false positives under load, not too long to delay failure detection.
 
 #### `PGPOOL_HEALTH_CHECK_MAX_RETRIES="5"`
 **What it does**: Number of failed health checks before marking a PostgreSQL node as down.
@@ -188,7 +242,7 @@
 
 **Simple explanation**: Similar to checking someone's pulse 5 times before declaring them unresponsive.
 
-**Impact on load testing**: Higher retries = more tolerance for temporary issues but slower failure detection.
+**Impact on load testing**: Provides tolerance for temporary issues while ensuring failed nodes are detected reliably.
 
 #### `PGPOOL_HEALTH_CHECK_RETRY_DELAY="5"`
 **What it does**: Time (in seconds) between health check retry attempts.
@@ -197,11 +251,51 @@
 
 **Simple explanation**: Similar to waiting 5 seconds between checking someone's pulse if they don't respond immediately.
 
-**Impact on load testing**: Affects how quickly failed nodes are detected and recovered.
+**Impact on load testing**: Balances quick failure detection with avoiding false positives during temporary slowdowns.
 
 ---
 
 ## PostgreSQL Database Settings
+
+### Query Performance Optimization (NVMe SSD)
+
+#### `random_page_cost=1.1`
+**What it does**: Tells PostgreSQL how expensive random disk access is compared to sequential access.
+
+**Technical explanation**: The query planner uses this cost to decide between index scans (random access) vs table scans (sequential access). With NVMe SSDs, random access is nearly as fast as sequential.
+
+**Simple explanation**: Like telling a librarian that jumping to random book locations is almost as fast as walking through shelves in order.
+
+**Impact on load testing**: Changed from default 4.0 (spinning disk assumption) to 1.1 (NVMe SSD reality). PostgreSQL will now prefer indexes more often, leading to faster query execution plans.
+
+#### `seq_page_cost=1.0`
+**What it does**: Cost baseline for sequential disk access (kept at standard 1.0).
+
+**Technical explanation**: This is the reference cost that other access costs are compared against.
+
+**Simple explanation**: The baseline speed for reading data in order.
+
+**Impact on load testing**: Provides the cost baseline for query planner decisions.
+
+### Parallel Query Processing
+
+#### `max_worker_processes=16`
+**What it does**: Total number of background worker processes PostgreSQL can use across all operations.
+
+**Technical explanation**: These workers handle parallel queries, maintenance tasks, and other background operations. Increased from default 8 to 16 to better utilize the 32 vCPU capacity.
+
+**Simple explanation**: Like having 16 total employees in a restaurant instead of 8 - more can work simultaneously.
+
+**Impact on load testing**: Enables more parallel operations, better utilizing the available CPU cores for complex queries and maintenance tasks.
+
+#### `max_parallel_workers_per_gather=4`
+**What it does**: Maximum number of workers that can collaborate on a single query operation.
+
+**Technical explanation**: For complex queries involving large table scans, JOINs, or aggregations, PostgreSQL can split the work among up to 4 workers instead of the default 2.
+
+**Simple explanation**: Like assigning 4 people to prepare one large order instead of 2.
+
+**Impact on load testing**: Improves performance for complex queries with JOINs and aggregations, especially beneficial as data volume grows with higher RPS.
 
 ### Connection Management
 
@@ -329,7 +423,79 @@ PREPARE TRANSACTION 'payment_123'; -- Wait for external confirmation
 ### Railway Platform Factors
 - **Container orchestration**: How Railway manages and scales containers
 - **Network latency**: Time for data to travel between containers
-- **Load balancer behavior**: How external traffic is distributed to API containers
+
+### Operating System Limits
+
+Railway has pre-configured enterprise-grade OS limits for high-performance applications:
+
+#### File Descriptor Limits
+**Current Configuration:**
+- Soft limit: `1,048,576` (1M+ file descriptors)
+- Hard limit: `1,048,576` 
+- System maximum: `9,223,372,036,854,775,807` (essentially unlimited)
+
+**What it does:** Controls maximum number of open files/sockets per process.
+
+**Technical explanation:** Each API connection, database connection, and file handle consumes one file descriptor. With 8 API workers × ~100 connections each = ~800 base connections, plus database pool connections.
+
+**Simple explanation:** Like having over 1 million phone lines available instead of the typical few thousand.
+
+**Impact on load testing:** No bottleneck for 1000+ RPS. Can handle massive connection loads without OS-level limitations.
+
+#### TCP Socket Configuration
+**Current Configuration:**
+- Listen queue size (`net.core.somaxconn`): `4,096`
+- SYN queue size (`net.ipv4.tcp_max_syn_backlog`): `4,096`
+
+**What it does:** Controls how many pending connections can be queued while waiting for the application to accept them.
+
+**Technical explanation:** When connections arrive faster than the application can accept them, they wait in these queues. 4,096 is a high-performance setting that prevents connection drops during traffic spikes.
+
+**Simple explanation:** Like having 4,096 people able to wait in line for service instead of the typical 128.
+
+**Impact on load testing:** Handles connection bursts well. Prevents "connection refused" errors during load spikes up to 4,096 simultaneous connection attempts.
+
+### Load Balancer Configuration
+
+Railway manages load balancing automatically with the following behavior:
+
+#### Traffic Distribution Method
+**Current Configuration:** Random distribution across replicas
+
+**What it does:** Railway randomly routes incoming requests to available API container replicas.
+
+**Technical explanation:** Each incoming HTTP request is sent to a randomly selected healthy replica. No session affinity or sticky sessions are supported.
+
+**Simple explanation:** Like a restaurant host randomly assigning customers to any available table, ensuring even distribution.
+
+**Impact on load testing:** Perfect for stateless APIs with JWT authentication. Each replica can handle any request independently, enabling true horizontal scaling.
+
+#### Health Check Configuration
+**Current Configuration:** Deployment-time health checks only
+
+**What it does:** Railway checks service health during deployments by calling the health endpoint until receiving HTTP 200 status.
+
+**Technical explanation:** 
+- Default timeout: 300 seconds (5 minutes)
+- Uses `PORT` environment variable for health check endpoint
+- Configurable via `RAILWAY_HEALTHCHECK_TIMEOUT_SEC`
+- Only runs during deployment, not continuous monitoring
+
+**Simple explanation:** Like checking that a new restaurant is ready to serve customers before opening the doors.
+
+**Impact on load testing:** Ensures zero-downtime deployments. For continuous monitoring during load testing, consider adding external monitoring tools.
+
+#### Scaling Configuration
+**Current Configuration:** Manual horizontal scaling (currently 1 replica)
+
+**What it does:** Add multiple API container replicas through Railway dashboard for horizontal scaling.
+
+**Technical explanation:** Each replica runs independently and receives a portion of the total traffic load through random distribution.
+
+**Simple explanation:** Like opening multiple identical restaurant locations to serve more customers simultaneously.
+
+**Impact on load testing:** For 1000 RPS scaling, can add replicas when single container reaches CPU/memory limits. Each replica reduces per-container load proportionally.
+
 - **Resource throttling**: Platform limits on CPU/memory/network usage
 
 ---
@@ -337,45 +503,138 @@ PREPARE TRANSACTION 'payment_123'; -- Wait for external confirmation
 ## Missing Factors to Consider
 
 - replicas -> how many / of what / how do they influence things etc.
+- redis
 
-### 1. Connection Pooler Settings Not Currently Configured
-
-#### `PGPOOL_CHILD_LIFE_TIME` (Env: 5400 seconds, default: 300 seconds)
-**What it does**: How long a PGPool child process lives before being recycled (PGPool default is 300 seconds/5 minutes).
-**Why it matters**: Prevents memory leaks and ensures fresh processes during long-running load tests.
-**Recommendation**: Setting to 5400 (1.5 hours) provides longer duration than connection lifetime (1800s).
-
-#### `PGPOOL_CHILD_MAX_CONNECTIONS` (Env: 1000, default: 0/disabled)
-**What it does**: Maximum number of connections a single child process handles before being recycled (PGPool default is 0/disabled).
-**Why it matters**: Prevents memory accumulation in busy child processes.
-**Recommendation**: Set to 1000 to recycle child processes after handling 1000 connections.
-
-#### `PGPOOL_RESERVED_CONNECTIONS` (Env: 10, default: 0)
-**What it does**: Reserves connection slots for superuser connections when at capacity (PGPool default is 0).
-**Why it matters**: Ensures admin access during overload situations.
-**Recommendation**: Set to 5-10 for emergency access during load tests.
-
-### 2. PostgreSQL Settings Not Currently Configured - to investigate
-- `max_worker_processes`
-- `max_parallel_workers_per_gather`
-- `random_page_cost`
-- `seq_page_cost`
+### 1. PostgreSQL Settings Not Currently Configured - to investigate
 - sharding - for write scalability - related to both pgpool and nodes
 
-### 3. API Application Settings to Consider - to investigate
-- `keepAliveTimeout`
-- `connectionTimeout`
-- `bodyLimit`
+### 2. Load Balancer Configuration - Railway Managed ✅
+Railway automatically manages load balancing with random distribution, deployment-time health checks, and manual horizontal scaling. See "System-Level Factors → Load Balancer Configuration" section above for details.
 
-### 4. Operating System Factors - to investigate
-- File Descriptor Limits
-- TCP Socket Settings
-- Memory Overcommit Settings
+---
 
-### 5. Load Balancer Configuration - to investigate
-- Session Affinity
-- Health Check Settings
-- Timeout Settings
+## Frequently Asked Questions (FAQ)
+
+### 1. What is the load balancer?
+
+The load balancer is Railway's traffic distribution system that routes incoming HTTP requests from users to your API container replicas. It operates at the platform level, sitting between the internet and your application containers.
+
+**Flow:** `Users → Railway Load Balancer → API Container Replicas → PGPool → PostgreSQL`
+
+**Key characteristics:**
+- Managed automatically by Railway
+- Uses random distribution between replicas
+- No session affinity (perfect for stateless APIs)
+- 15-minute HTTP request timeout
+- Handles health checks during deployments
+
+### 2. What type of storage does Railway use?
+
+Railway uses **NVMe SSDs** for all storage, including containers and databases. This is significantly faster than traditional spinning disks or even regular SSDs.
+
+**Impact on PostgreSQL configuration:**
+- `random_page_cost` should be set to 1.1 instead of default 4.0
+- Query planner makes better decisions with SSD-optimized cost settings
+- Faster random access enables better index usage
+
+### 3. Should I use stateless or stateful architecture for modern systems?
+
+**Stateless is strongly recommended** for modern cloud-native applications, especially those that need to scale.
+
+**Stateless benefits:**
+- Easy horizontal scaling (add more replicas)
+- Simple load balancing (any replica handles any request)
+- Container-friendly (no session data lost on restarts)
+- Cloud-native (works with auto-scaling, multi-region deployments)
+- Better fault tolerance (server crashes don't lose user sessions)
+
+**Implementation:**
+- Use JWT tokens for authentication (contains all user info)
+- Store persistent data in databases, not server memory
+- Keep cache layers separate (Redis) for performance
+
+### 4. How does having more API container replicas help?
+
+**Load Distribution:**
+- Distributes CPU/memory usage across multiple containers
+- Each replica handles a portion of total RPS (4 replicas = ~250 RPS each for 1000 total RPS)
+- Reduces per-container resource pressure
+
+**Database Impact:**
+- Spreads database connections across replicas (better connection pool utilization)
+- Same total database workload, but from multiple sources
+- Doesn't help with database CPU/storage limits
+- Write bottleneck remains (PostgreSQL primary node limit)
+
+**Regional Benefits:**
+- Lower latency for users in different geographic regions
+- Better user experience through proximity
+- Disaster recovery (if one region fails, others continue)
+
+### 5. Does the load balancer decide which replica to use based on user location?
+
+**Yes, for multi-region deployments.** Railway's edge network automatically routes users to the nearest region.
+
+**How it works:**
+- User in Europe → EU region replica
+- User in US → US region replica
+- User in Asia → Asia region replica
+
+**Within a region:** Random distribution between replicas (no geographic preference)
+
+**Latency improvement:** 50-200ms faster response times compared to cross-continent requests
+
+### 6. Should PostgreSQL node replicas be in the same region as the PGPool container?
+
+**Yes, absolutely.** PGPool and PostgreSQL nodes should be in the same region for optimal performance.
+
+**Why co-location matters:**
+- PGPool manages connections to each PostgreSQL node
+- Every database query goes: `API → PGPool → PostgreSQL → PGPool → API`
+- Cross-region PGPool-to-PostgreSQL adds 2x latency penalties
+- Network latency between PGPool and database nodes affects every single query
+
+**Correct multi-region architecture:**
+- **Option 1:** Single region with all components (simpler)
+- **Option 2:** Complete database cluster per region with data replication (complex)
+
+**Avoid:** Cross-region PostgreSQL nodes with single-region PGPool (worst performance)
+
+### 7. How do I determine the right target RPS for my application?
+
+**Start with user behavior analysis, not just concurrent user counts.**
+
+*Note: The following is AI-generated reasoning based on typical web application patterns, not actual statistics from real applications.*
+
+**Example calculation for an NFT platform with 20k concurrent users:**
+
+**User Activity Breakdown:**
+- Active browsing: 60% (12k users) - browsing NFTs, player stats  
+- Idle/viewing: 30% (6k users) - looking at images, reading
+- Purchasing/minting: 10% (2k users) - active transactions
+
+**Request Frequency:**
+- Browsing users: ~1 request every 10-15 seconds
+- Transaction users: ~1 request every 5-8 seconds (more intensive)
+
+**RPS Calculation:**
+- Browsing: 12k users ÷ 12 seconds avg = 1,000 RPS
+- Transactions: 2k users ÷ 6 seconds avg = 333 RPS
+- **Total baseline: ~1,300-1,400 RPS**
+
+**Account for traffic spikes:**
+- NFT drops, major events: 2-3x normal load
+- **Peak target: 3,000-4,000 RPS**
+
+**Progressive scaling approach:**
+1. **Phase 1:** 800-1,000 RPS (normal high traffic)
+2. **Phase 2:** 1,500-2,000 RPS (busy periods)  
+3. **Phase 3:** 3,000-4,000 RPS (event spikes)
+
+**Read/Write ratio matters:**
+- Typical web apps: 80% reads, 20% writes
+- Database writes are often the bottleneck (single primary node)
+- Optimize for your specific traffic patterns
 
 ---
 
