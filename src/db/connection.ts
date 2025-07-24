@@ -24,28 +24,28 @@ collectDefaultMetrics({ register });
 
 // ✅ Prevent re-registering metrics (hot reload / cluster forks)
 if (!(globalThis as any).__pgMetricsInit) {
-  const pgPoolSize = new Gauge({
+  new Gauge({
     name: 'pg_pool_size',
     help: 'Current pool size (active + idle).',
     registers: [register],
     collect() { this.set(pool.totalCount); },
   });
 
-  const pgPoolActive = new Gauge({
+  new Gauge({
     name: 'pg_pool_active_connections',
     help: 'Active connections.',
     registers: [register],
     collect() { this.set(pool.totalCount - pool.idleCount); },
   });
 
-  const pgPoolIdle = new Gauge({
+  new Gauge({
     name: 'pg_pool_idle_connections',
     help: 'Idle connections.',
     registers: [register],
     collect() { this.set(pool.idleCount); },
   });
 
-  const pgPoolWaiting = new Gauge({
+  new Gauge({
     name: 'pg_pool_waiting_connections',
     help: 'Waiting clients.',
     registers: [register],

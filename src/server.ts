@@ -10,7 +10,7 @@ const numCPUs = availableParallelism();
 if (cluster.isPrimary) {
   console.log(`🚀 Primary ${process.pid} is running`);
   
-  // Fork workers (configurable via WORKERS env var, default to CPU count, max 12 for better I/O handling)
+  // Fork workers (configurable via WORKERS env var, default to CPU count, max 12 to match PGPOOL_NUM_INIT_CHILDREN=1200)
   const maxWorkers = parseInt(process.env.WORKERS || '0') || Math.min(numCPUs, 12);
   const numWorkers = Math.min(maxWorkers, 12);
   console.log(`🔥 Starting ${numWorkers} workers...`);
@@ -41,8 +41,8 @@ if (cluster.isPrimary) {
     logger: {
       level: process.env.LOG_LEVEL || 'info'
     },
-    keepAliveTimeout: parseInt(process.env.FASTIFY_KEEP_ALIVE_TIMEOUT || '65000'),
-    connectionTimeout: parseInt(process.env.FASTIFY_CONNECTION_TIMEOUT || '20000'),
+    keepAliveTimeout: parseInt(process.env.FASTIFY_KEEP_ALIVE_TIMEOUT || '90000'),
+    connectionTimeout: parseInt(process.env.FASTIFY_CONNECTION_TIMEOUT || '30000'),
     bodyLimit: parseInt(process.env.FASTIFY_BODY_LIMIT || '1048576'),
     maxParamLength: 500,
     ignoreTrailingSlash: true,
