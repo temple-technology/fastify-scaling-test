@@ -13,7 +13,7 @@ export default async function (fastify: FastifyInstance, opts: FastifyPluginOpti
   fastify.register(cors, {
     origin: corsOrigin,
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
   });
 
   const pluginOptions: Partial<AutoloadPluginOptions> = {};
