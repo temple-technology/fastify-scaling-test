@@ -410,6 +410,80 @@ PREPARE TRANSACTION 'payment_123'; -- Wait for external confirmation
 
 **Impact on load testing**: Reduces I/O interference with user queries during high-load periods.
 
+#### `checkpoint_timeout=15min`
+**What it does**: Sets the interval between automatic WAL checkpoints (increased from 5min default).
+
+**Technical explanation**: PostgreSQL performs a checkpoint every 15 minutes instead of 5, reducing checkpoint frequency and total I/O load on NVMe SSDs.
+
+**Simple explanation**: Similar to filing paperwork every 15 minutes instead of every 5, reducing interruptions but increasing recovery time if system crashes.
+
+**Impact on load testing**: Reduces I/O spikes during sustained load. Trade-off: longer recovery time (10-15min) acceptable for most applications, critical for payment systems needing <5min recovery.
+
+#### `wal_compression=lz4`
+**What it does**: Compresses WAL (Write-Ahead Log) data using LZ4 algorithm.
+
+**Technical explanation**: Reduces WAL I/O by 40-50% and replication bandwidth with minimal CPU overhead. LZ4 provides fast compression/decompression ideal for database workloads.
+
+**Simple explanation**: Similar to zipping transaction logs before writing to disk, saving 40-50% space and bandwidth.
+
+**Impact on load testing**: Significantly reduces disk I/O during write-heavy workloads, improves replication performance between primary and replica nodes.
+
+### Additional Performance Optimizations
+
+#### `effective_io_concurrency=10`
+**What it does**: Tells PostgreSQL how many concurrent I/O operations the storage system can handle efficiently.
+
+**Technical explanation**: Enables PostgreSQL to issue multiple I/O requests in parallel during bitmap heap scans. Value of 1 (worst) forces sequential I/O, while 10-20 leverages NVMe SSD parallelism.
+
+**Simple explanation**: Similar to telling workers they can fetch 10 items simultaneously instead of one at a time.
+
+**Impact on load testing**: Dramatically improves performance of queries using bitmap index scans, especially on NVMe SSDs that excel at parallel I/O.
+
+#### `max_parallel_workers=16`
+**What it does**: Total number of worker processes available for parallel query execution.
+
+**Technical explanation**: Increased from 8 to match max_worker_processes=16, fully utilizing available background workers for parallel operations.
+
+**Simple explanation**: Similar to having 16 workers available for big tasks instead of only using 8 while 8 sit idle.
+
+**Impact on load testing**: Better utilization of 32 vCPUs for complex queries, aggregations, and JOINs during high load.
+
+#### `autovacuum_vacuum_scale_factor=0.02`
+**What it does**: Triggers autovacuum when table has 2% dead rows instead of default 20%.
+
+**Technical explanation**: More aggressive vacuuming prevents accumulation of dead rows. AWS/EDB recommend 2% for large tables to prevent 200GB of dead rows in a 1TB table.
+
+**Simple explanation**: Similar to emptying trash when it's 2% full instead of waiting until 20% full.
+
+**Impact on load testing**: Maintains consistent query performance by preventing table bloat during sustained write operations.
+
+#### `autovacuum_vacuum_cost_limit=2000`
+**What it does**: Increases autovacuum work rate by 10x (from default 200).
+
+**Technical explanation**: Allows autovacuum to do more work per cycle. AWS recommends 2000-10000 for NVMe SSDs that can handle higher I/O rates.
+
+**Simple explanation**: Similar to allowing janitors to clean 10x faster since the building has better equipment.
+
+**Impact on load testing**: Faster cleanup of dead rows during high-transaction workloads, preventing performance degradation.
+
+#### `tcp_keepalives_idle=60`
+**What it does**: Detects dead connections in 1 minute instead of 2 hours (default 7200s).
+
+**Technical explanation**: Sends TCP keep-alive probe after 60 seconds of inactivity, with probes every 10 seconds (tcp_keepalives_interval) for 6 attempts (tcp_keepalives_count).
+
+**Simple explanation**: Similar to checking if someone is still on the phone every minute instead of waiting 2 hours.
+
+**Impact on load testing**: Prevents connection slot exhaustion from dead connections, critical in cloud environments with network interruptions.
+
+#### `log_min_duration_statement=500`
+**What it does**: Logs all SQL queries taking longer than 500ms.
+
+**Technical explanation**: Essential for identifying slow queries during load testing. Use 100ms for aggressive debugging, 1000ms or -1 (disabled) after optimization.
+
+**Simple explanation**: Similar to recording any task that takes longer than half a second to complete.
+
+**Impact on load testing**: Critical for performance optimization - identifies bottleneck queries that need indexes or optimization during high load.
+
 ---
 
 ## System-Level Factors
